@@ -8,6 +8,9 @@ function Base.show(io::IO, to::TimerOutput; allocations::Bool = true, sortby::Sy
     sortby  in (:time, :ncalls, :allocations, :name, :firstexec) || throw(ArgumentError("sortby should be :time, :allocations, :ncalls, :name, or :firstexec, got $sortby"))
     linechars in (:unicode, :ascii)                  || throw(ArgumentError("linechars should be :unicode or :ascii, got $linechars"))
 
+    poll!(to)
+    # complement!(to)
+
     t₀, b₀ = to.start_data.time, to.start_data.allocs
     t₁, b₁ = time_ns(), gc_bytes()
     Δt, Δb = t₁ - t₀, b₁ - b₀
@@ -144,6 +147,7 @@ function _print_timer(io::IO, to::TimerOutput, ∑t::Integer, ∑b::Integer, ind
     name = truncdots(to.name, name_length - indent)
     print(io, " ")
     nc = accum_data.ncalls
+    nc = max(1, nc)
     print(io, " "^indent, rpad(name, name_length + 2 - indent))
     print(io, lpad(prettycount(nc), 5, " "))
 
