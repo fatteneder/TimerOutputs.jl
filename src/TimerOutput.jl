@@ -52,7 +52,7 @@ mutable struct TimerOutput
 
 end
 
-Base.copy(to::TimerOutput) = TimerOutput(copy(to.start_data), to.time_last_log, to.allocs_last_log, copy(to.accumulated_data), copy(to.inner_timers),
+Base.copy(to::TimerOutput) = TimerOutput(copy(to.start_data), copy(to.accumulated_data), copy(to.inner_timers),
                                          copy(to.timer_stack), to.name, to.flattened, to.enabled, to.totmeasured, "", nothing)
 
 const DEFAULT_TIMER = TimerOutput()
@@ -236,16 +236,13 @@ function _timer_expr(m::Module, is_debug::Bool, to::Union{Symbol, Expr, TimerOut
         if $enabled
             $accumulated_data = $(push!)($local_to, $label)
         end
-        $b₀ = $(gc_bytes)()
-        $t₀ = $(time_ns)()
-        $(to).time_last_log = $t₀
-        $(to).allocs_last_log = $b₀
+        $to.time_last_log   = $(time_ns)()
+        $to.allocs_last_log = $(gc_bytes)()
         $(Expr(:tryfinally,
             :($val = $ex),
             quote
                 if $enabled
-                    # $(do_accumulate!)($accumulated_data, $t₀, $b₀)
-                    $(poll!)(to)
+                    $(do_accumulate!)($accumulated_data, $to.time_last_log, $to.allocs_last_log)
                     $(pop!)($local_to)
                 end
             end))
@@ -285,11 +282,23 @@ function timer_expr_func(m::Module, is_debug::Bool, to, expr::Expr, label=nothin
     return esc(combinedef(def))
 end
 
+
 function do_accumulate!(accumulated_data, t₀, b₀; iscall=true)
     accumulated_data.time += time_ns() - t₀
     accumulated_data.allocs += gc_bytes() - b₀
-    # accumulated_data.ncalls += 1
     iscall && (accumulated_data.ncalls += 1)
+end
+
+
+function poll!(to::TimerOutput)
+    if length(to.inner_timers) > 0
+        for timer in values(to.inner_timers)
+            poll!(timer)
+        end
+    end
+    do_accumulate!(to.accumulated_data, to.time_last_log, to.allocs_last_log; iscall=false)
+    to.time_last_log   = time_ns()
+    to.allocs_last_log = gc_bytes()
 end
 
 
@@ -409,28 +418,4 @@ function notimeit_expr(to, ex::Expr)
             end))
         val
     end
-end
-
-
-function poll!(to::TimerOutput)
-    # display((to.name,to.prev_timer_label))
-    # println("$(to.prev_timer_label): before poll update: $(to.time_last_log)")
-    if length(to.inner_timers) > 0
-        for timer in values(to.inner_timers)
-            poll!(timer)
-        end
-    end
-    # println("$(to.prev_timer_label): after poll update: $(to.time_last_log)")
-    # before = to.time_last_log
-    # display(to.accumulated_data)
-    # display(to.time_last_log)
-    # display(to.accumulated_data)
-    # if !isnothing(accum_time)
-    do_accumulate!(to.accumulated_data, to.time_last_log, to.allocs_last_log; iscall=false)
-    # end
-    to.allocs_last_log = gc_bytes()
-    to.time_last_log = time_ns()
-    # display(to.accumulated_data.time/1e9)
-    # println("$(to.prev_timer_label): after accumulate: $(to.time_last_log)")
-    # println("$(to.prev_timer_label): diff accumulate: $((to.time_last_log-before)/1e9)")
 end

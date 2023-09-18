@@ -9,7 +9,6 @@ function Base.show(io::IO, to::TimerOutput; allocations::Bool = true, sortby::Sy
     linechars in (:unicode, :ascii)                  || throw(ArgumentError("linechars should be :unicode or :ascii, got $linechars"))
 
     poll!(to)
-    # complement!(to)
 
     t₀, b₀ = to.start_data.time, to.start_data.allocs
     t₁, b₁ = time_ns(), gc_bytes()
