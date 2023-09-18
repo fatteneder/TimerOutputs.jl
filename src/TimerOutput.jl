@@ -23,7 +23,8 @@ end
 ###############
 mutable struct TimerOutput
     start_data::TimeData
-    last_entered::Int64
+    time_last_log::Int64
+    allocs_last_log::Int64
     accumulated_data::TimeData
     inner_timers::Dict{String,TimerOutput}
     timer_stack::Vector{TimerOutput}
@@ -36,21 +37,22 @@ mutable struct TimerOutput
 
     function TimerOutput(label::String = "root")
         start_data = TimeData(0, time_ns(), gc_bytes())
-        last_entered = start_data.time
+        time_last_log = start_data.time
+        allocs_last_log = start_data.allocs
         accumulated_data = TimeData()
         inner_timers = Dict{String,TimerOutput}()
         timer_stack = TimerOutput[]
-        return new(start_data, last_entered, accumulated_data, inner_timers, timer_stack, label, false, true, (0, 0), "", nothing)
+        return new(start_data, time_last_log, allocs_last_log, accumulated_data, inner_timers, timer_stack, label, false, true, (0, 0), "", nothing)
     end
 
     # Jeez...
     TimerOutput(start_data, accumulated_data, inner_timers, timer_stack, name, flattened, enabled, totmeasured, prev_timer_label,
-    prev_timer) = new(start_data, start_data.time, accumulated_data, inner_timers, timer_stack, name, flattened, enabled, totmeasured, prev_timer_label,
+    prev_timer) = new(start_data, start_data.time, start_data.allocs, accumulated_data, inner_timers, timer_stack, name, flattened, enabled, totmeasured, prev_timer_label,
     prev_timer)
 
 end
 
-Base.copy(to::TimerOutput) = TimerOutput(copy(to.start_data), to.last_entered, copy(to.accumulated_data), copy(to.inner_timers),
+Base.copy(to::TimerOutput) = TimerOutput(copy(to.start_data), to.time_last_log, to.allocs_last_log, copy(to.accumulated_data), copy(to.inner_timers),
                                          copy(to.timer_stack), to.name, to.flattened, to.enabled, to.totmeasured, "", nothing)
 
 const DEFAULT_TIMER = TimerOutput()
@@ -236,7 +238,8 @@ function _timer_expr(m::Module, is_debug::Bool, to::Union{Symbol, Expr, TimerOut
         end
         $b₀ = $(gc_bytes)()
         $t₀ = $(time_ns)()
-        $(to).last_entered = $t₀
+        $(to).time_last_log = $t₀
+        $(to).allocs_last_log = $b₀
         $(Expr(:tryfinally,
             :($val = $ex),
             quote
@@ -294,7 +297,8 @@ reset_timer!() = reset_timer!(DEFAULT_TIMER)
 function reset_timer!(to::TimerOutput)
     to.inner_timers = Dict{String,TimerOutput}()
     to.start_data = TimeData(0, time_ns(), gc_bytes())
-    to.last_entered = to.start_data.time
+    to.time_last_log = to.start_data.time
+    to.allocs_last_log = to.start_data.allocs
     to.accumulated_data = TimeData()
     to.prev_timer_label = ""
     to.prev_timer = nothing
@@ -368,8 +372,9 @@ function complement!(to::TimerOutput)
         return nothing
     end
     # tot_time = to.accumulated_data.time
-    tot_time = to.last_entered
-    tot_allocs = to.accumulated_data.allocs
+    tot_time = to.time_last_log
+    # tot_allocs = to.accumulated_data.allocs
+    tot_allocs = to.allocs_last_log
     for timer in values(to.inner_timers)
         tot_time -= timer.accumulated_data.time
         tot_allocs -= timer.accumulated_data.allocs
@@ -409,22 +414,23 @@ end
 
 function poll!(to::TimerOutput)
     # display((to.name,to.prev_timer_label))
-    # println("$(to.prev_timer_label): before poll update: $(to.last_entered)")
+    # println("$(to.prev_timer_label): before poll update: $(to.time_last_log)")
     if length(to.inner_timers) > 0
         for timer in values(to.inner_timers)
             poll!(timer)
         end
     end
-    # println("$(to.prev_timer_label): after poll update: $(to.last_entered)")
-    # before = to.last_entered
+    # println("$(to.prev_timer_label): after poll update: $(to.time_last_log)")
+    # before = to.time_last_log
     # display(to.accumulated_data)
-    # display(to.last_entered)
+    # display(to.time_last_log)
     # display(to.accumulated_data)
     # if !isnothing(accum_time)
-    do_accumulate!(to.accumulated_data, to.last_entered, 0; iscall=false)
+    do_accumulate!(to.accumulated_data, to.time_last_log, to.allocs_last_log; iscall=false)
     # end
-    to.last_entered = time_ns()
+    to.allocs_last_log = gc_bytes()
+    to.time_last_log = time_ns()
     # display(to.accumulated_data.time/1e9)
-    # println("$(to.prev_timer_label): after accumulate: $(to.last_entered)")
-    # println("$(to.prev_timer_label): diff accumulate: $((to.last_entered-before)/1e9)")
+    # println("$(to.prev_timer_label): after accumulate: $(to.time_last_log)")
+    # println("$(to.prev_timer_label): diff accumulate: $((to.time_last_log-before)/1e9)")
 end
